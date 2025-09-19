@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TourneyJS - Analizador Léxico</title>
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="estyles.css" />
+  <!-- Table styles for team stats (override / complement) -->
+  <style>
+    /* Tabla de estadísticas por equipo - tema oscuro coherente con la app */
+    .team-stats { width:100%; border-collapse: collapse; margin-top:12px; font-family: Poppins, Arial, sans-serif; color:#e6eef6; }
+    .team-stats thead th { background:#071a2b; color:#06b6d4; padding:12px; text-align:left; font-weight:600; border:1px solid rgba(255,255,255,0.03); }
+    .team-stats tbody td { padding:12px; border-top:1px solid rgba(255,255,255,0.02); color:#dbeef7; }
+    .team-stats tbody tr td:not(.team-name) { background: rgba(6,182,212,0.03); text-align:center; }
+    .team-stats tbody tr:nth-child(odd) td:not(.team-name) { background: rgba(6,182,212,0.025); }
+    /* columna de nombre del equipo en tono oscuro con texto claro */
+    .team-stats tbody td.team-name { background:#0b2a3a; color:#e6eef6; font-weight:600; text-align:left; }
+    .team-stats tbody td.team-name a { color:inherit; text-decoration:none; }
+    /* mejorar legibilidad del area de reportes en tema oscuro */
+    .report-area { color:#e6eef6; background: transparent; }
+  </style>
+
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Viz.js -->
+  <script src="https://unpkg.com/viz.js@2.1.2/viz.js" defer></script>
+  <script src="https://unpkg.com/viz.js@2.1.2/full.render.js" defer></script>
+
+  <!-- App -->
+  <script src="aplicacion.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <h2>TourneyJS</h2>
+      <nav>
+        <a href="#editor" class="active"><i class="fa fa-code"></i> Editor</a>
+        <a href="#tokens"><i class="fa fa-list"></i> Tokens</a>
+        <a href="#errors"><i class="fa fa-exclamation-triangle"></i> Errores</a>
+        <a href="#reports"><i class="fa fa-chart-bar"></i> Reportes</a>
+        <a href="#bracket"><i class="fa fa-sitemap"></i> Bracket</a>
+      </nav>
+      <div class="sidebar-footer"><small>Proyecto 1 — LFP — 2S2025</small></div>
+    </aside>
+
+    <!-- Content -->
+    <main class="content">
+      <!-- Editor -->
+      <section id="editor" class="tab active">
+        <div class="panel header-panel">
+          <h1>Editor de Entrada</h1>
+          <div class="actions">
+            <input id="fileInput" type="file" accept=".txt,text/plain" title="Seleccionar archivo .txt" />
+            <button id="loadExample"><i class="fa fa-file-alt"></i> Ejemplo</button>
+            <button id="analyzeBtn" class="primary"><i class="fa fa-play"></i> Analizar</button>
+            <button id="exportReport"><i class="fa fa-download"></i> Exportar</button>
+          </div>
+        </div>
+        <div class="panel">
+          <textarea id="inputText" placeholder="Pega aquí tu archivo de torneo..."></textarea>
+          <div id="messages" class="messages">Estado: esperando análisis.</div>
+        </div>
+      </section>
+
+      <!-- Tokens -->
+      <section id="tokens" class="tab">
+        <div class="panel">
+          <h2>Tokens</h2>
+          <div class="table-wrap">
+            <table id="tokensTable">
+              <thead><tr><th>No.</th><th>Lexema</th><th>Tipo</th><th>Línea</th><th>Col</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Errores -->
+      <section id="errors" class="tab">
+        <div class="panel">
+          <h2>Errores</h2>
+          <div class="table-wrap">
+            <table id="errorsTable">
+              <thead><tr><th>No.</th><th>Lexema</th><th>Tipo</th><th>Descripción</th><th>Línea</th><th>Col</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Reportes -->
+      <section id="reports" class="tab">
+        <div class="panel">
+          <h2>Reportes</h2>
+          <div class="report-buttons">
+            <button id="showStandings"><i class="fa fa-trophy"></i> Tabla de Posiciones</button>
+            <button id="showStats"><i class="fa fa-futbol"></i> Estadísticas</button>
+            <button id="showScorers"><i class="fa fa-star"></i> Goleadores</button>
+            <button id="showBracketReport"><i class="fa fa-sitemap"></i> Bracket Eliminación</button>
+            <button id="showTeamStats"><i class="fa fa-list"></i> Estadísticas por Equipo</button>
+            <button id="showGeneralInfo"><i class="fa fa-info-circle"></i> Información General</button>
+            <button id="downloadHtmlReport"><i class="fa fa-file-code"></i> Descargar HTML</button>
+          </div>
+          <div id="reportArea" class="report-area"></div>
+        </div>
+      </section>
+
+      <!-- Bracket -->
+      <section id="bracket" class="tab">
+        <div class="panel">
+          <h2>Bracket</h2>
+          <div id="graph" class="graph"></div>
+          <button id="downloadDot"><i class="fa fa-download"></i> Descargar DOT</button>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
