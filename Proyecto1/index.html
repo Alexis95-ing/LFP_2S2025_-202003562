@@ -9,26 +9,53 @@
   <link rel="stylesheet" href="styles.css" />
   <!-- Fallback rápido: fuerza tema oscuro si styles.css no carga -->
   <style>
-    html,body{background:#0b1220;color:#e6eef6;height:100%}
-    .app{min-height:100vh;background:transparent}
-    .sidebar{background:#071a2b;color:#e6eef6}
-    .panel{background:transparent}
-    .messages{color:#c7f0fb}
-  </style>
-
-  <!-- Table styles for team stats (override / complement) -->
-  <style>
-    /* Tabla de estadísticas por equipo - tema oscuro coherente con la app */
-    .team-stats { width:100%; border-collapse: collapse; margin-top:12px; font-family: Poppins, Arial, sans-serif; color:#e6eef6; }
-    .team-stats thead th { background:#071a2b; color:#06b6d4; padding:12px; text-align:left; font-weight:600; border:1px solid rgba(255,255,255,0.03); }
-    .team-stats tbody td { padding:12px; border-top:1px solid rgba(255,255,255,0.02); color:#dbeef7; }
-    .team-stats tbody tr td:not(.team-name) { background: rgba(6,182,212,0.03); text-align:center; }
-    .team-stats tbody tr:nth-child(odd) td:not(.team-name) { background: rgba(6,182,212,0.025); }
-    /* columna de nombre del equipo en tono oscuro con texto claro */
-    .team-stats tbody td.team-name { background:#0b2a3a; color:#e6eef6; font-weight:600; text-align:left; }
-    .team-stats tbody td.team-name a { color:inherit; text-decoration:none; }
-    /* mejorar legibilidad del area de reportes en tema oscuro */
-    .report-area { color:#e6eef6; background: transparent; }
+    html,body{background:#0b1220;color:#e6eef6;height:100%;margin:0;padding:0;}
+    .app{min-height:100vh;background:transparent;display:flex;}
+    .sidebar{background:#071a2b;color:#e6eef6;width:250px;padding:20px;box-sizing:border-box;}
+    .sidebar h2{color:#06b6d4;margin:0 0 30px 0;}
+    .sidebar nav{display:flex;flex-direction:column;gap:10px;}
+    .sidebar nav a{color:#e6eef6;text-decoration:none;padding:12px 15px;border-radius:8px;display:flex;align-items:center;gap:10px;transition:all 0.3s;}
+    .sidebar nav a:hover{background:rgba(6,182,212,0.1);color:#06b6d4;}
+    .sidebar nav a.active{background:#06b6d4;color:#0b1220;}
+    .sidebar-footer{margin-top:auto;padding-top:20px;color:#94a3b8;font-size:12px;}
+    .content{flex:1;padding:20px;overflow-y:auto;}
+    .tab{display:none;}
+    .tab.active{display:block;}
+    .panel{background:rgba(7,26,43,0.3);border-radius:8px;padding:20px;margin-bottom:20px;}
+    .messages{color:#c7f0fb;padding:10px;background:rgba(6,182,212,0.1);border-radius:4px;margin-top:10px;}
+    .header-panel{display:flex;justify-content:space-between;align-items:center;}
+    .actions{display:flex;gap:10px;align-items:center;}
+    button{background:#06b6d4;color:#0b1220;border:none;padding:10px 15px;border-radius:6px;cursor:pointer;font-weight:600;}
+    button:hover{background:#0891b2;}
+    button.primary{background:#22c55e;}
+    button.primary:hover{background:#16a34a;}
+    #inputText{width:100%;height:300px;background:#071a2b;color:#e6eef6;border:1px solid #233240;border-radius:6px;padding:15px;font-family:monospace;resize:vertical;}
+    table{width:100%;border-collapse:collapse;margin-top:15px;}
+    th,td{padding:10px;border:1px solid #233240;text-align:left;}
+    th{background:#071a2b;color:#06b6d4;}
+    .table-wrap{overflow-x:auto;}
+    .report-buttons{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px;}
+    .report-area{min-height:200px;background:rgba(7,26,43,0.3);border-radius:8px;padding:20px; color:#e6eef6; background: transparent;}
+    
+    /* Estilos para tabla de goleadores */
+    .scorers-table { width:100%; border-collapse: collapse; margin-top:12px; font-family: Poppins, Arial, sans-serif; color:#e6eef6; }
+    .scorers-table thead th { background:#071a2b; color:#06b6d4; padding:12px; text-align:center; font-weight:600; border:1px solid rgba(255,255,255,0.03); }
+    .scorers-table tbody td { padding:12px; border-top:1px solid rgba(255,255,255,0.02); color:#dbeef7; text-align:center; }
+    .scorers-table tbody tr:nth-child(even) { background: rgba(6,182,212,0.03); }
+    .scorers-table tbody tr:nth-child(odd) { background: rgba(6,182,212,0.025); }
+    .scorers-table .position { background:#0b2a3a; color:#e6eef6; font-weight:600; width:80px; }
+    .scorers-table .player-name { background:#071a2b; color:#06b6d4; font-weight:600; text-align:left; }
+    .scorers-table .team-name { background:#0b2a3a; color:#e6eef6; text-align:left; }
+    .scorers-table .goals { background:#22c55e; color:#0b1220; font-weight:600; width:80px; }
+    .scorers-table .minutes { background:rgba(6,182,212,0.1); color:#c7f0fb; }
+    
+    /* Estilos para tabla de información general */
+    .general-info-table { width:100%; border-collapse: collapse; margin-top:12px; font-family: Poppins, Arial, sans-serif; color:#e6eef6; }
+    .general-info-table thead th { background:#4a90b8; color:#ffffff; padding:12px; text-align:center; font-weight:600; border:1px solid rgba(255,255,255,0.1); }
+    .general-info-table tbody tr:nth-child(even) { background: #d1e7f0; }
+    .general-info-table tbody tr:nth-child(odd) { background: #b8d4e3; }
+    .general-info-table .stat-label { background:#4a90b8; color:#ffffff; padding:12px; font-weight:600; text-align:left; border:1px solid rgba(255,255,255,0.1); }
+    .general-info-table .stat-value { padding:12px; color:#0b1220; text-align:left; border:1px solid rgba(255,255,255,0.1); }
   </style>
 
   <!-- Fonts -->
@@ -42,7 +69,6 @@
   <script src="https://unpkg.com/viz.js@2.1.2/full.render.js" defer></script>
 
   <!-- App -->
-  <script src="aplicacion.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -70,7 +96,6 @@
             <input id="fileInput" type="file" accept=".txt,text/plain" title="Seleccionar archivo .txt" />
             <button id="loadExample"><i class="fa fa-file-alt"></i> Ejemplo</button>
             <button id="analyzeBtn" class="primary"><i class="fa fa-play"></i> Analizar</button>
-            <button id="exportReport"><i class="fa fa-download"></i> Exportar</button>
           </div>
         </div>
         <div class="panel">
@@ -116,6 +141,14 @@
             <button id="showBracketReport"><i class="fa fa-sitemap"></i> Bracket Eliminación</button>
             <button id="showTeamStats"><i class="fa fa-list"></i> Estadísticas por Equipo</button>
             <button id="showGeneralInfo"><i class="fa fa-info-circle"></i> Información General</button>
+            <hr style="margin: 15px 0; border: 1px solid rgba(255,255,255,0.1);">
+            <h3 style="color: #06b6d4; margin: 10px 0;">Descargas Individuales</h3>
+            <button id="downloadTokensReport"><i class="fa fa-list"></i> Descargar Tokens</button>
+            <button id="downloadErrorsReport"><i class="fa fa-exclamation-triangle"></i> Descargar Errores</button>
+            <button id="downloadStatsReport"><i class="fa fa-chart-bar"></i> Descargar Estadísticas</button>
+            <button id="downloadScorersReport"><i class="fa fa-star"></i> Descargar Goleadores</button>
+            <button id="downloadBracketHtmlReport"><i class="fa fa-sitemap"></i> Descargar Bracket</button>
+            <hr style="margin: 15px 0; border: 1px solid rgba(255,255,255,0.1);">
             <button id="downloadHtmlReport"><i class="fa fa-file-code"></i> Descargar HTML</button>
           </div>
           <div id="reportArea" class="report-area"></div>
@@ -127,10 +160,15 @@
         <div class="panel">
           <h2>Bracket</h2>
           <div id="graph" class="graph"></div>
-          <button id="downloadDot"><i class="fa fa-download"></i> Descargar DOT</button>
+          <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+            <button id="downloadDot"><i class="fa fa-file-code"></i> Descargar DOT</button>
+            <button id="downloadPng"><i class="fa fa-image"></i> Descargar PNG</button>
+            <button id="downloadSvg"><i class="fa fa-vector-square"></i> Descargar SVG</button>
+          </div>
         </div>
       </section>
     </main>
   </div>
 </body>
+</html>
 </html>

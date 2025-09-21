@@ -455,7 +455,7 @@ function parseScore(resultado){
    ============================ */
 function computeStats(model){
   const teams = {};
-  const scorers = {};
+  const scorers = []; // Cambiar a array para mantener goles individuales
 
   // initialize from equipos list
   if(model.equipos && Array.isArray(model.equipos)){
@@ -509,11 +509,27 @@ function computeStats(model){
         // goleadores
         if(p.goleadores && Array.isArray(p.goleadores)){
           p.goleadores.forEach(g => {
-            // g puede ser {jugador, minuto} o {jugador} (o por compatibilidad, si existiera un string)
             const name = (typeof g === "string") ? g : (g && g.jugador) ? g.jugador : null;
             if(!name) return;
-            if(!scorers[name]) scorers[name] = {jugador: name, goles: 0};
-            scorers[name].goles++;
+            
+            // Determinar equipo del goleador
+            let equipoGoleador = "N/A";
+            if(model.equipos && Array.isArray(model.equipos)) {
+              for(const equipo of model.equipos) {
+                if(equipo.jugadores && equipo.jugadores.some(j => j.nombre === name)) {
+                  equipoGoleador = equipo.nombre;
+                  break;
+                }
+              }
+            }
+            
+            // Añadir gol individual
+            scorers.push({
+              jugador: name,
+              equipo: equipoGoleador,
+              minuto: (typeof g === "object" && g.minuto) ? g.minuto : null,
+              fase: fase // para referencia adicional
+            });
           });
         }
       });
@@ -533,33 +549,153 @@ function computeStats(model){
     return B.golesFavor - A.golesFavor;
   });
 
-  const scorersList = Object.values(scorers).sort((a,b) => b.goles - a.goles);
+  // Ordenar goleadores por jugador para agrupar
+  const scorersList = scorers.sort((a,b) => {
+    if(a.jugador !== b.jugador) return a.jugador.localeCompare(b.jugador);
+    return (parseInt(a.minuto) || 0) - (parseInt(b.minuto) || 0);
+  });
 
   return {standings, scorers: scorersList};
 }
 
 /* ============================
-   generateDOT(model) - Graphviz DOT
+   generateDOT(model) - Graphviz DOT estilo bracket de torneo
    ============================ */
 function generateDOT(model){
-  let dot = 'digraph Bracket {\n  rankdir=LR;\n  node [shape=box, style="rounded,filled", fillcolor="#ffffff10", color="#e6eef6"];\n';
-  for(const [phase, partidos] of Object.entries(model.eliminacion || {})){
-    partidos.forEach((p, idx) => {
-      const matchId = `match_${phase}_${idx}`;
-      const aId = `node_${phase}_${idx}_A`;
-      const bId = `node_${phase}_${idx}_B`;
-      // normalizar y extraer resultado con tolerancia a espacios: "3-1", "3 - 1", etc.
-      const res = (p.resultado || "").trim();
-      const parsed = parseScore(res);
-      const aGoals = parsed ? String(parsed.a) : "";
-      const bGoals = parsed ? String(parsed.b) : "";
-      const labelA = aGoals ? `${p.equipoA} (${aGoals})` : `${p.equipoA}`;
-      const labelB = bGoals ? `${p.equipoB} (${bGoals})` : `${p.equipoB}`;
-      dot += `  ${aId} [label=${JSON.stringify(labelA)}];\n  ${bId} [label=${JSON.stringify(labelB)}];\n`;
-      dot += `  ${aId} -> ${matchId} [arrowhead=none];\n  ${bId} -> ${matchId} [arrowhead=none];\n`;
-      dot += `  ${matchId} [label=${JSON.stringify(phase)}, shape=oval, style=filled, fillcolor="#06b6d420", color="#06b6d4"];\n`;
+  const torneoNombre = (model.torneo && model.torneo.nombre) ? model.torneo.nombre : "Torneo";
+  
+  let dot = `digraph TorneoBracket {
+  rankdir=TB;
+  bgcolor="#0b1220";
+  fontname="Arial Bold";
+  fontsize=16;
+  fontcolor="#06b6d4";
+  
+  // Título del torneo
+  label="${torneoNombre}\\nBracket de Eliminación";
+  labelloc=t;
+  
+  // Configuración global de nodos
+  node [
+    fontname="Arial",
+    fontsize=12,
+    style="filled,rounded",
+    shape=box,
+    margin=0.1
+  ];
+  
+  // Configuración global de aristas
+  edge [
+    color="#06b6d4",
+    penwidth=2,
+    arrowsize=0.8
+  ];
+`;
+
+  // Procesar cada fase
+  const fases = ['cuartos', 'semifinal', 'final'];
+  let nodeCounter = 0;
+  
+  // Crear nodos por fase
+  fases.forEach((fase, faseIndex) => {
+    if(model.eliminacion && model.eliminacion[fase]) {
+      dot += `\n  // ${fase.toUpperCase()}\n`;
+      dot += `  subgraph cluster_${fase} {\n`;
+      dot += `    label="${fase.charAt(0).toUpperCase() + fase.slice(1)}";\n`;
+      dot += `    fontcolor="#06b6d4";\n`;
+      dot += `    color="#233240";\n`;
+      dot += `    style="rounded,dashed";\n\n`;
+      
+      model.eliminacion[fase].forEach((partido, partidoIndex) => {
+        const equipoAId = `team_${fase}_${partidoIndex}_A`;
+        const equipoBId = `team_${fase}_${partidoIndex}_B`;
+        const partidoId = `match_${fase}_${partidoIndex}`;
+        
+        // Determinar ganador y colores
+        let equipoAColor = "#4ade80"; // verde por defecto
+        let equipoBColor = "#f87171"; // rojo por defecto
+        let ganador = null;
+        
+        if(partido.resultado && typeof partido.resultado === 'string') {
+          const parsed = parseScore(partido.resultado);
+          if(parsed) {
+            if(parsed.a > parsed.b) {
+              ganador = 'A';
+              equipoAColor = "#22c55e"; // verde ganador
+              equipoBColor = "#6b7280"; // gris perdedor
+            } else if(parsed.b > parsed.a) {
+              ganador = 'B';
+              equipoBColor = "#22c55e"; // verde ganador
+              equipoAColor = "#6b7280"; // gris perdedor
+            } else {
+              equipoAColor = "#f59e0b"; // amarillo empate
+              equipoBColor = "#f59e0b";
+            }
+          }
+        }
+        
+        // Crear nodos de equipos
+        const labelA = partido.resultado && parseScore(partido.resultado) ? 
+          `${partido.equipoA}\\n${parseScore(partido.resultado).a}` : 
+          partido.equipoA;
+        const labelB = partido.resultado && parseScore(partido.resultado) ? 
+          `${partido.equipoB}\\n${parseScore(partido.resultado).b}` : 
+          partido.equipoB;
+          
+        dot += `    ${equipoAId} [label="${labelA}", fillcolor="${equipoAColor}", fontcolor="white"];\n`;
+        dot += `    ${equipoBId} [label="${labelB}", fillcolor="${equipoBColor}", fontcolor="white"];\n`;
+        
+        // Nodo del partido/resultado
+        dot += `    ${partidoId} [label="VS", shape=circle, fillcolor="#06b6d4", fontcolor="white", width=0.5, height=0.5];\n`;
+        
+        // Conexiones
+        dot += `    ${equipoAId} -> ${partidoId} [dir=none];\n`;
+        dot += `    ${equipoBId} -> ${partidoId} [dir=none];\n`;
+        
+        // Si hay siguiente fase, conectar ganador
+        if(faseIndex < fases.length - 1 && ganador) {
+          const siguienteFase = fases[faseIndex + 1];
+          if(model.eliminacion[siguienteFase] && model.eliminacion[siguienteFase][Math.floor(partidoIndex/2)]) {
+            const siguientePartido = Math.floor(partidoIndex / 2);
+            const siguienteEquipo = partidoIndex % 2 === 0 ? 'A' : 'B';
+            const siguienteId = `team_${siguienteFase}_${siguientePartido}_${siguienteEquipo}`;
+            
+            const ganadorId = ganador === 'A' ? equipoAId : equipoBId;
+            dot += `    ${ganadorId} -> ${siguienteId} [color="#ffd700", penwidth=3, label="Ganador"];\n`;
+          }
+        }
+      });
+      
+      dot += `  }\n\n`;
+    }
+  });
+  
+  // Ranking de fases para layout
+  dot += `  // Layout ranking\n`;
+  if(model.eliminacion.cuartos) {
+    dot += `  {rank=same; `;
+    model.eliminacion.cuartos.forEach((_, i) => {
+      dot += `team_cuartos_${i}_A; team_cuartos_${i}_B; `;
     });
+    dot += `}\n`;
   }
+  
+  if(model.eliminacion.semifinal) {
+    dot += `  {rank=same; `;
+    model.eliminacion.semifinal.forEach((_, i) => {
+      dot += `team_semifinal_${i}_A; team_semifinal_${i}_B; `;
+    });
+    dot += `}\n`;
+  }
+  
+  if(model.eliminacion.final) {
+    dot += `  {rank=same; `;
+    model.eliminacion.final.forEach((_, i) => {
+      dot += `team_final_${i}_A; team_final_${i}_B; `;
+    });
+    dot += `}\n`;
+  }
+
   dot += '}\n';
   return dot;
 }
@@ -646,34 +782,148 @@ function renderTeamStats(stats){
 
 function renderScorersHtml(scorers){
   if(!scorers || scorers.length === 0) return '<p>No hay goleadores registrados.</p>';
-  let html = '<table class="report-table"><thead><tr><th>#</th><th>Jugador</th><th>Goles</th></tr></thead><tbody>';
-  scorers.forEach((s,i) => html += `<tr><td>${i+1}</td><td>${escapeHtml(s.jugador)}</td><td>${s.goles}</td></tr>`);
+  
+  let html = '<table class="scorers-table"><thead><tr><th>Posición</th><th>Jugador</th><th>Equipo</th><th>Goles</th><th>Minutos de Gol</th></tr></thead><tbody>';
+  
+  // Agrupar goles por jugador para calcular totales y minutos
+  const groupedScorers = {};
+  scorers.forEach(s => {
+    const key = s.jugador;
+    if(!groupedScorers[key]) {
+      groupedScorers[key] = {
+        jugador: s.jugador,
+        equipo: s.equipo,
+        goles: 0,
+        minutos: []
+      };
+    }
+    groupedScorers[key].goles++;
+    if(s.minuto) {
+      groupedScorers[key].minutos.push(s.minuto);
+    }
+  });
+  
+  // Convertir a array y ordenar por goles (descendente)
+  const sortedScorers = Object.values(groupedScorers).sort((a,b) => b.goles - a.goles);
+  
+  // Renderizar tabla
+  sortedScorers.forEach((s,i) => {
+    const minutosText = s.minutos.length > 0 ? s.minutos.join(', ') + "'" : 'N/A';
+    html += `<tr>
+      <td class="position">${i+1}</td>
+      <td class="player-name">${escapeHtml(s.jugador)}</td>
+      <td class="team-name">${escapeHtml(s.equipo)}</td>
+      <td class="goals">${s.goles}</td>
+      <td class="minutes">${minutosText}</td>
+    </tr>`;
+  });
+  
   html += '</tbody></table>';
   return html;
 }
 
 function renderGeneralInfo(model, stats){
   if(!model.torneo) return '<p>No hay información general del torneo.</p>';
+  
   const totalEquipos = (model.equipos && model.equipos.length) || 0;
-  let totalPartidos = 0, totalGoles = 0;
+  let totalPartidos = 0, totalGoles = 0, partidosCompletados = 0;
+  
+  // Calcular estadísticas de partidos
   Object.values(model.eliminacion || {}).forEach(fase => {
     fase.forEach(p => {
+      totalPartidos++; // Total programado
       const parsed = parseScore(p.resultado);
       if(p.resultado && parsed){
-        totalPartidos++;
+        partidosCompletados++;
         const a = parsed.a, b = parsed.b;
         totalGoles += a + b;
       }
     });
   });
-  const maxScorer = (stats && stats.scorers && stats.scorers.length) ? stats.scorers[0] : null;
-  let html = `<div class="card-grid">
-    <div class="card"><h4>Torneo</h4><p>${escapeHtml(model.torneo.nombre || '')}</p></div>
-    <div class="card"><h4>Equipos</h4><p>${totalEquipos}</p></div>
-    <div class="card"><h4>Partidos Jugados</h4><p>${totalPartidos}</p></div>
-    <div class="card"><h4>Goles Totales</h4><p>${totalGoles}</p></div>`;
-  if(maxScorer) html += `<div class="card"><h4>Máximo Goleador</h4><p>${escapeHtml(maxScorer.jugador)} (${maxScorer.goles})</p></div>`;
-  html += '</div>';
+  
+  // Calcular promedio de goles por partido
+  const promedioGoles = partidosCompletados > 0 ? (totalGoles / partidosCompletados).toFixed(1) : '0.0';
+  
+  // Calcular edad promedio de jugadores
+  let totalJugadores = 0, sumaEdades = 0;
+  if(model.equipos && Array.isArray(model.equipos)) {
+    model.equipos.forEach(equipo => {
+      if(equipo.jugadores && Array.isArray(equipo.jugadores)) {
+        equipo.jugadores.forEach(jugador => {
+          if(jugador.edad && !isNaN(parseInt(jugador.edad))) {
+            totalJugadores++;
+            sumaEdades += parseInt(jugador.edad);
+          }
+        });
+      }
+    });
+  }
+  const edadPromedio = totalJugadores > 0 ? (sumaEdades / totalJugadores).toFixed(2) : '0.00';
+  
+  // Determinar fase actual (última fase con partidos completados)
+  let faseActual = 'No iniciado';
+  const fasesOrden = ['cuartos', 'semifinal', 'final'];
+  for(let i = fasesOrden.length - 1; i >= 0; i--) {
+    const fase = fasesOrden[i];
+    if(model.eliminacion[fase]) {
+      const hayCompletados = model.eliminacion[fase].some(p => p.resultado && parseScore(p.resultado));
+      if(hayCompletados) {
+        faseActual = fase.charAt(0).toUpperCase() + fase.slice(1);
+        break;
+      }
+    }
+  }
+  
+  // Obtener sede desde torneo
+  const sede = (model.torneo && model.torneo.sede) ? model.torneo.sede : 'No especificada';
+  
+  // Crear tabla estilo clave-valor
+  let html = `<table class="general-info-table">
+    <thead>
+      <tr>
+        <th>Estadística</th>
+        <th>Valor</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="stat-label">Nombre del Torneo</td>
+        <td class="stat-value">${escapeHtml(model.torneo.nombre || 'No especificado')}</td>
+      </tr>
+      <tr>
+        <td class="stat-label">Sede</td>
+        <td class="stat-value">${escapeHtml(sede)}</td>
+      </tr>
+      <tr>
+        <td class="stat-label">Equipos Participantes</td>
+        <td class="stat-value">${totalEquipos}</td>
+      </tr>
+      <tr>
+        <td class="stat-label">Total de Partidos Programados</td>
+        <td class="stat-value">${totalPartidos}</td>
+      </tr>
+      <tr>
+        <td class="stat-label">Partidos Completados</td>
+        <td class="stat-value">${partidosCompletados}</td>
+      </tr>
+      <tr>
+        <td class="stat-label">Total de Goles</td>
+        <td class="stat-value">${totalGoles}</td>
+      </tr>
+      <tr>
+        <td class="stat-label">Promedio de Goles por Partido</td>
+        <td class="stat-value">${promedioGoles}</td>
+      </tr>
+      <tr>
+        <td class="stat-label">Edad Promedio de Jugadores</td>
+        <td class="stat-value">${edadPromedio} años</td>
+      </tr>
+      <tr>
+        <td class="stat-label">Fase Actual</td>
+        <td class="stat-value">${faseActual}</td>
+      </tr>
+    </tbody>
+  </table>`;
   return html;
 }
 
@@ -681,25 +931,81 @@ function renderGeneralInfo(model, stats){
    UI wiring: DOM interactions
    ============================ */
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('🚀 TourneyJS: Script cargado correctamente');
-  console.log('🔧 Verificando funciones globales...');
-  console.log('parseScore:', typeof parseScore);
-  console.log('scan:', typeof scan);
-  console.log('buildModel:', typeof buildModel);
-  console.log('computeStats:', typeof computeStats);
-  console.log('generateDOT:', typeof generateDOT);
+  console.log('TourneyJS: DOM Cargado');
   
-  // Tab navigation
+  // Verificar que estamos en la página correcta
+  console.log('URL actual:', window.location.href);
+  console.log('Título de página:', document.title);
+  
+  // Tab navigation con verificación robusta
   const navLinks = document.querySelectorAll('.sidebar nav a');
   const tabs = document.querySelectorAll('.tab');
-  navLinks.forEach(link => {
+  
+  console.log(`Encontrados ${navLinks.length} enlaces de navegación`);
+  console.log(`Encontradas ${tabs.length} pestañas`);
+  
+  // Listar todos los enlaces encontrados
+  navLinks.forEach((link, i) => {
+    console.log(` Enlace ${i+1}: ${link.getAttribute('href')} - "${link.textContent.trim()}"`);
+  });
+  
+  // Listar todas las pestañas encontradas
+  tabs.forEach((tab, i) => {
+    console.log(`Pestaña ${i+1}: ${tab.id} - activa: ${tab.classList.contains('active')}`);
+  });
+  
+  if(navLinks.length === 0) {
+    console.error('No se encontraron enlaces de navegación en .sidebar nav a');
+    return;
+  }
+  
+  if(tabs.length === 0) {
+    console.error('No se encontraron pestañas con clase .tab');
+    return;
+  }
+  
+  // Función helper para navegación
+  function navTo(tabId){
+    console.log(`Navegando a pestaña: ${tabId}`);
+    
+    // Remover active de todos los enlaces
+    navLinks.forEach(l => l.classList.remove('active'));
+    // Remover active de todas las pestañas
+    tabs.forEach(t => t.classList.remove('active'));
+    
+    // Activar enlace correspondiente
+    const activeLink = document.querySelector(`.sidebar nav a[href="#${tabId}"]`);
+    if(activeLink) {
+      activeLink.classList.add('active');
+      console.log(`Enlace activado: ${tabId}`);
+    } else {
+      console.warn(` No se encontró enlace para: ${tabId}`);
+    }
+    
+    // Activar pestaña correspondiente
+    const activeTab = document.getElementById(tabId);
+    if(activeTab) {
+      activeTab.classList.add('active');
+      console.log(`Pestaña activada: ${tabId}`);
+    } else {
+      console.warn(`No se encontró pestaña con ID: ${tabId}`);
+    }
+  }
+  
+  // Añadir event listeners a cada enlace
+  navLinks.forEach((link, index) => {
+    const href = link.getAttribute('href');
+    console.log(`🔗 Configurando enlace ${index + 1}: ${href}`);
+    
     link.addEventListener('click', (e) => {
       e.preventDefault();
-      const target = link.getAttribute('href').substring(1);
-      navLinks.forEach(l => l.classList.remove('active'));
-      link.classList.add('active');
-      tabs.forEach(tab => tab.classList.toggle('active', tab.id === target));
+      e.stopPropagation();
+      const target = href.substring(1); // quitar el #
+      console.log(`Click en enlace: ${target}`);
+      navTo(target);
     });
+    
+    console.log(`Event listener añadido a enlace ${index + 1}`);
   });
 
   // DOM elements
@@ -707,7 +1013,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const fileInput = document.getElementById('fileInput');
   const loadExampleBtn = document.getElementById('loadExample');
   const analyzeBtn = document.getElementById('analyzeBtn');
-  const exportReportBtn = document.getElementById('exportReport');
   const tokensTableBody = document.querySelector('#tokensTable tbody');
   const errorsTableBody = document.querySelector('#errorsTable tbody');
   const messagesEl = document.getElementById('messages');
@@ -716,17 +1021,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Verificar que los elementos críticos existan
   const criticalElements = {
-    inputText, fileInput, loadExampleBtn, analyzeBtn, messagesEl
+    inputText, fileInput, loadExampleBtn, analyzeBtn, messagesEl, reportArea, graphDiv
   };
   
   for(const [name, element] of Object.entries(criticalElements)) {
     if(!element) {
-      console.error(` Elemento crítico no encontrado: ${name}`);
-      return;
+      console.error(`Elemento crítico no encontrado: ${name}`);
+    } else {
+      console.log(` Elemento encontrado: ${name}`);
     }
   }
-  
-  console.log(' Todos los elementos DOM críticos encontrados');
 
   const showStandingsBtn = document.getElementById('showStandings');
   const showStatsBtn = document.getElementById('showStats');
@@ -736,6 +1040,29 @@ document.addEventListener('DOMContentLoaded', () => {
   const showGeneralInfoBtn = document.getElementById('showGeneralInfo');
   const downloadHtmlReportBtn = document.getElementById('downloadHtmlReport');
   const downloadDotBtn = document.getElementById('downloadDot');
+  const downloadPngBtn = document.getElementById('downloadPng');
+  const downloadSvgBtn = document.getElementById('downloadSvg');
+  
+  // Botones de descarga individual
+  const downloadTokensReport = document.getElementById('downloadTokensReport');
+  const downloadErrorsReport = document.getElementById('downloadErrorsReport');
+  const downloadStatsReport = document.getElementById('downloadStatsReport');
+  const downloadScorersReport = document.getElementById('downloadScorersReport');
+  const downloadBracketHtmlReport = document.getElementById('downloadBracketHtmlReport');
+
+  // Verificar botones de reportes
+  const reportButtons = {
+    showStandingsBtn, showStatsBtn, showScorersBtn, showBracketReportBtn, 
+    showTeamStatsBtn, showGeneralInfoBtn, downloadHtmlReportBtn, downloadDotBtn,
+    downloadPngBtn, downloadSvgBtn, downloadTokensReport, downloadErrorsReport,
+    downloadStatsReport, downloadScorersReport, downloadBracketHtmlReport
+  };
+  
+  for(const [name, btn] of Object.entries(reportButtons)) {
+    if(!btn) {
+      console.warn(`Botón no encontrado: ${name}`);
+    }
+  }
 
   // Example content
   const exampleText = `TORNEO { nombre: "Copa Mundo", equipos: 4 }
@@ -762,7 +1089,7 @@ ELIMINACION {
   fileInput.addEventListener('change', (ev) => {
     const f = ev.target.files[0];
     if(!f) {
-      messagesEl.textContent = ' No se seleccionó ningún archivo.';
+      messagesEl.textContent = 'No se seleccionó ningún archivo.';
       return;
     }
     
@@ -780,26 +1107,25 @@ ELIMINACION {
       try {
         const content = e.target.result;
         if(content === null || content === undefined) {
-          messagesEl.textContent = ' Error: el archivo está vacío o no se pudo leer.';
+          messagesEl.textContent = 'Error: el archivo está vacío o no se pudo leer.';
           return;
         }
         inputText.value = content;
-        messagesEl.textContent = ` Archivo cargado: ${f.name} (${content.length} caracteres)`;
+        messagesEl.textContent = `Archivo cargado: ${f.name} (${content.length} caracteres)`;
       } catch(error) {
-        messagesEl.textContent = ` Error al procesar el archivo: ${error.message}`;
+        messagesEl.textContent = `Error al procesar el archivo: ${error.message}`;
         console.error('Error al cargar archivo:', error);
       }
     };
     
     reader.onerror = e => {
-      messagesEl.textContent = ` Error al leer el archivo: ${e.target.error}`;
+      messagesEl.textContent = `Error al leer el archivo: ${e.target.error}`;
       console.error('Error FileReader:', e.target.error);
     };
     
     reader.onabort = e => {
       messagesEl.textContent = 'Carga de archivo cancelada.';
     };
-    
     
     reader.readAsText(f, 'UTF-8');
   });
@@ -811,7 +1137,6 @@ ELIMINACION {
     console.log('Ejemplo cargado exitosamente');
   });
 
-  
   let lastAnalysis = {tokens: [], errors: [], model: null, stats: null, dot: ""};
 
   // Presentación: formatea lexema y etiqueta legible del tipo de token
@@ -852,6 +1177,256 @@ ELIMINACION {
     reportArea.innerHTML = '<p style="color:#fbbf24;">No hay reporte: ejecuta el análisis primero.</p>';
   }
 
+  // Funciones para generar reportes individuales
+  function generateTokensReport(tokens) {
+    const styles = getReportStyles();
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Reporte de Tokens - TourneyJS</title>${styles}</head><body>
+      <h1>Reporte de Tokens - TourneyJS</h1>
+      <h2>Análisis Léxico</h2>
+      <p>Total de tokens encontrados: <strong>${tokens.length}</strong></p>
+      <table><thead><tr><th>No</th><th>Lexema</th><th>Tipo</th><th>Línea</th><th>Col</th></tr></thead><tbody>
+      ${tokens.map((t,i)=>`<tr><td>${i+1}</td><td>${formatLexeme(t)}</td><td>${tokenTypeLabel(t)}</td><td>${t.line}</td><td>${t.col}</td></tr>`).join('')}
+      </tbody></table>
+      <footer style="margin-top: 30px; padding: 15px; background: rgba(6,182,212,0.1); border-radius: 8px;">
+        <small>Generado por TourneyJS - Analizador Léxico</small>
+      </footer>
+    </body></html>`;
+  }
+
+  function generateErrorsReport(errors) {
+    const styles = getReportStyles();
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Reporte de Errores - TourneyJS</title>${styles}</head><body>
+      <h1>Reporte de Errores - TourneyJS</h1>
+      <h2>Errores Encontrados</h2>
+      <p>Total de errores: <strong style="color: #ef4444;">${errors.length}</strong></p>
+      ${errors.length === 0 ? '<div style="background: rgba(34,197,94,0.2); padding: 15px; border-radius: 8px; color: #22c55e;"><h3>¡Sin errores!</h3><p>El análisis se completó sin errores léxicos o sintácticos.</p></div>' : 
+      `<table><thead><tr><th>No</th><th>Lexema</th><th>Tipo</th><th>Descripción</th><th>Línea</th><th>Col</th></tr></thead><tbody>
+      ${errors.map((e,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(e.lexema)}</td><td>${escapeHtml(e.tipo)}</td><td>${escapeHtml(e.descripcion||'')}</td><td>${e.line||''}</td><td>${e.col||''}</td></tr>`).join('')}
+      </tbody></table>`}
+      <footer style="margin-top: 30px; padding: 15px; background: rgba(6,182,212,0.1); border-radius: 8px;">
+        <small>Generado por TourneyJS - Analizador Léxico</small>
+      </footer>
+    </body></html>`;
+  }
+
+  function generateStatsReport(model, stats) {
+    const styles = getReportStyles();
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Estadísticas del Torneo - TourneyJS</title>${styles}</head><body>
+      <h1>Estadísticas del Torneo - TourneyJS</h1>
+      <h2>Información General</h2>
+      ${renderGeneralInfo(model, stats)}
+      <h2>Estadísticas por Equipo</h2>
+      ${renderTeamStats(stats)}
+      <footer style="margin-top: 30px; padding: 15px; background: rgba(6,182,212,0.1); border-radius: 8px;">
+        <small>Generado por TourneyJS - Analizador de Torneos</small>
+      </footer>
+    </body></html>`;
+  }
+
+  function generateScorersReport(stats) {
+    const styles = getReportStyles();
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Tabla de Goleadores - TourneyJS</title>${styles}</head><body>
+      <h1>Tabla de Goleadores - TourneyJS</h1>
+      <h2>Ranking de Goleadores</h2>
+      ${renderScorersHtml(stats.scorers)}
+      <footer style="margin-top: 30px; padding: 15px; background: rgba(6,182,212,0.1); border-radius: 8px;">
+        <small>Generado por TourneyJS - Analizador de Torneos</small>
+      </footer>
+    </body></html>`;
+  }
+
+  function generateBracketHtmlReport(model) {
+    const styles = getReportStyles();
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Bracket de Eliminación - TourneyJS</title>${styles}</head><body>
+      <h1>Bracket de Eliminación - TourneyJS</h1>
+      <h2>Resultados del Torneo</h2>
+      ${renderBracketReport(model)}
+      <footer style="margin-top: 30px; padding: 15px; background: rgba(6,182,212,0.1); border-radius: 8px;">
+        <small>Generado por TourneyJS - Analizador de Torneos</small>
+      </footer>
+    </body></html>`;
+  }
+
+  function getReportStyles() {
+    return `<style>
+        body{font-family:Arial,Helvetica,sans-serif;background:#0b1220;color:#e6eef6;padding:20px;margin:0;}
+        h1,h2,h3{color:#06b6d4; margin-top: 20px; margin-bottom: 15px;} 
+        table{width:100%;border-collapse:collapse;margin-bottom:20px;}
+        th,td{padding:12px 8px;border:1px solid #233240;text-align:left;} 
+        th{background:#071a2b;color:#06b6d4;font-weight:600;}
+        tr:nth-child(even){background:rgba(6,182,212,0.02);}
+        .card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:20px 0;}
+        .card{background:#071a2b;padding:15px;border-radius:8px;border:1px solid rgba(6,182,212,0.1);}
+        .card h4{margin:0 0 10px 0;color:#06b6d4;}
+        .team-stats { width:100%; border-collapse: collapse; margin-top:12px; font-family: Arial, sans-serif; color:#e6eef6; }
+        .team-stats thead th { background:#071a2b; color:#06b6d4; padding:12px; text-align:left; font-weight:600; border:1px solid rgba(255,255,255,0.03); }
+        .team-stats tbody td { padding:12px; border-top:1px solid rgba(255,255,255,0.02); color:#dbeef7; }
+        .team-stats tbody tr td:not(.team-name) { background: rgba(6,182,212,0.03); text-align:center; }
+        .team-stats tbody tr:nth-child(odd) td:not(.team-name) { background: rgba(6,182,212,0.025); }
+        .team-stats tbody td.team-name { background:#0b2a3a; color:#e6eef6; font-weight:600; text-align:left; }
+        .report-table{width:100%;border-collapse:collapse;}
+        .report-table th{background:#071a2b;color:#06b6d4;padding:10px;}
+        .report-table td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.05);}
+        /* Estilos específicos para tabla de goleadores */
+        .scorers-table { width:100%; border-collapse: collapse; margin-top:12px; font-family: Arial, sans-serif; color:#e6eef6; }
+        .scorers-table thead th { background:#071a2b; color:#06b6d4; padding:12px; text-align:center; font-weight:600; border:1px solid rgba(255,255,255,0.03); }
+        .scorers-table tbody td { padding:12px; border-top:1px solid rgba(255,255,255,0.02); color:#dbeef7; text-align:center; }
+        .scorers-table tbody tr:nth-child(even) { background: rgba(6,182,212,0.03); }
+        .scorers-table tbody tr:nth-child(odd) { background: rgba(6,182,212,0.025); }
+        .scorers-table .position { background:#0b2a3a; color:#e6eef6; font-weight:600; width:80px; }
+        .scorers-table .player-name { background:#071a2b; color:#06b6d4; font-weight:600; text-align:left; }
+        .scorers-table .team-name { background:#0b2a3a; color:#e6eef6; text-align:left; }
+        .scorers-table .goals { background:#22c55e; color:#0b1220; font-weight:600; width:80px; }
+        .scorers-table .minutes { background:rgba(6,182,212,0.1); color:#c7f0fb; }
+        /* Estilos específicos para tabla de información general */
+        .general-info-table { width:100%; border-collapse: collapse; margin-top:12px; font-family: Arial, sans-serif; color:#e6eef6; }
+        .general-info-table thead th { background:#4a90b8; color:#ffffff; padding:12px; text-align:center; font-weight:600; border:1px solid rgba(255,255,255,0.1); }
+        .general-info-table tbody tr:nth-child(even) { background: #d1e7f0; }
+        .general-info-table tbody tr:nth-child(odd) { background: #b8d4e3; }
+        .general-info-table .stat-label { background:#4a90b8; color:#ffffff; padding:12px; font-weight:600; text-align:left; border:1px solid rgba(255,255,255,0.1); }
+        .general-info-table .stat-value { padding:12px; color:#0b1220; text-align:left; border:1px solid rgba(255,255,255,0.1); }
+        footer{text-align:center;color:#94a3b8;}
+      </style>`;
+  }
+
+  // Función para descargar imagen del gráfico
+  function downloadGraphImage(format = 'png') {
+    if(!lastAnalysis || !lastAnalysis.dot) {
+      noAnalysisMessage();
+      return;
+    }
+    
+    try {
+      if(typeof Viz === 'undefined') {
+        messagesEl.textContent = 'Viz.js no disponible para generar imagen.';
+        return;
+      }
+      
+      const viz = new Viz();
+      
+      if(format === 'png') {
+        viz.renderImageElement(lastAnalysis.dot, {format: 'png', scale: 2})
+          .then(element => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = function() {
+              canvas.width = img.width;
+              canvas.height = img.height;
+              ctx.drawImage(img, 0, 0);
+              
+              canvas.toBlob(blob => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'Bracket_TourneyJS.png';
+                a.click();
+                URL.revokeObjectURL(url);
+              }, 'image/png');
+            };
+            
+            img.src = element.src;
+          })
+          .catch(err => {
+            messagesEl.textContent = 'Error al generar PNG: ' + err;
+          });
+      } else {
+        viz.renderSVGElement(lastAnalysis.dot)
+          .then(element => {
+            const svgData = new XMLSerializer().serializeToString(element);
+            const blob = new Blob([svgData], {type: 'image/svg+xml'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'Bracket_TourneyJS.svg';
+            a.click();
+            URL.revokeObjectURL(url);
+          })
+          .catch(err => {
+            messagesEl.textContent = 'Error al generar SVG: ' + err;
+          });
+      }
+    } catch(err) {
+      messagesEl.textContent = 'Error al procesar imagen: ' + err;
+    }
+  }
+
+  // download helper
+  function downloadBlob(filename, content, type='text/plain;charset=utf-8'){
+    const blob = new Blob([content], {type});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // HTML report generator (embebe los reportes)
+  function generateHtmlReport({tokens, errors, model, stats, dot}){
+    const styles = `<style>
+        body{font-family:Arial,Helvetica,sans-serif;background:#0b1220;color:#e6eef6;padding:20px}
+        h1,h2,h3{color:#06b6d4} table{width:100%;border-collapse:collapse;margin-bottom:12px}
+        th,td{padding:8px;border:1px solid #233240} th{background:#071a2b;color:#06b6d4}
+        .card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+        .card{background:#071a2b;padding:12px;border-radius:8px}
+        /* estilos team-stats (tema oscuro) */
+        .team-stats { width:100%; border-collapse: collapse; margin-top:12px; font-family: Poppins, Arial, sans-serif; color:#e6eef6; }
+        .team-stats thead th { background:#071a2b; color:#06b6d4; padding:12px; text-align:left; font-weight:600; border:1px solid rgba(255,255,255,0.03); }
+        .team-stats tbody td { padding:12px; border-top:1px solid rgba(255,255,255,0.02); color:#dbeef7; }
+        .team-stats tbody tr td:not(.team-name) { background: rgba(6,182,212,0.03); text-align:center; }
+        .team-stats tbody tr:nth-child(odd) td:not(.team-name) { background: rgba(6,182,212,0.025); }
+        .team-stats tbody td.team-name { background:#0b2a3a; color:#e6eef6; font-weight:600; text-align:left; }
+        /* Estilos específicos para tabla de goleadores */
+        .scorers-table { width:100%; border-collapse: collapse; margin-top:12px; font-family: Arial, sans-serif; color:#e6eef6; }
+        .scorers-table thead th { background:#071a2b; color:#06b6d4; padding:12px; text-align:center; font-weight:600; border:1px solid rgba(255,255,255,0.03); }
+        .scorers-table tbody td { padding:12px; border-top:1px solid rgba(255,255,255,0.02); color:#dbeef7; text-align:center; }
+        .scorers-table tbody tr:nth-child(even) { background: rgba(6,182,212,0.03); }
+        .scorers-table tbody tr:nth-child(odd) { background: rgba(6,182,212,0.025); }
+        .scorers-table .position { background:#0b2a3a; color:#e6eef6; font-weight:600; width:80px; }
+        .scorers-table .player-name { background:#071a2b; color:#06b6d4; font-weight:600; text-align:left; }
+        .scorers-table .team-name { background:#0b2a3a; color:#e6eef6; text-align:left; }
+        .scorers-table .goals { background:#22c55e; color:#0b1220; font-weight:600; width:80px; }
+        .scorers-table .minutes { background:rgba(6,182,212,0.1); color:#c7f0fb; }
+        /* Estilos específicos para tabla de información general */
+        .general-info-table { width:100%; border-collapse: collapse; margin-top:12px; font-family: Arial, sans-serif; color:#e6eef6; }
+        .general-info-table thead th { background:#4a90b8; color:#ffffff; padding:12px; text-align:center; font-weight:600; border:1px solid rgba(255,255,255,0.1); }
+        .general-info-table tbody tr:nth-child(even) { background: #d1e7f0; }
+        .general-info-table tbody tr:nth-child(odd) { background: #b8d4e3; }
+        .general-info-table .stat-label { background:#4a90b8; color:#ffffff; padding:12px; font-weight:600; text-align:left; border:1px solid rgba(255,255,255,0.1); }
+        .general-info-table .stat-value { padding:12px; color:#0b1220; text-align:left; border:1px solid rgba(255,255,255,0.1); }
+        footer{text-align:center;color:#94a3b8;}
+      </style>`;
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Reporte TourneyJS</title>${styles}</head><body>
+      <h1>Reporte TourneyJS</h1>
+      <h2>Tokens</h2>
+      <table><thead><tr><th>No</th><th>Lexema</th><th>Tipo</th><th>Línea</th><th>Col</th></tr></thead><tbody>
+      ${tokens.map((t,i)=>`<tr><td>${i+1}</td><td>${formatLexeme(t)}</td><td>${tokenTypeLabel(t)}</td><td>${t.line}</td><td>${t.col}</td></tr>`).join('')}
+      </tbody></table>
+
+      <h2>Errores</h2>
+      <table><thead><tr><th>No</th><th>Lexema</th><th>Tipo</th><th>Descripción</th><th>Línea</th><th>Col</th></tr></thead><tbody>
+      ${errors.map((e,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(e.lexema)}</td><td>${escapeHtml(e.tipo)}</td><td>${escapeHtml(e.descripcion||'')}</td><td>${e.line||''}</td><td>${e.col||''}</td></tr>`).join('')}
+      </tbody></table>
+
+      <h2>Información General</h2>
+      ${renderGeneralInfo(model, stats)}
+
+      <h2>Bracket de Eliminación</h2>
+      ${renderBracketReport(model)}
+
+      <h2>Tabla de Posiciones</h2>
+      ${renderTeamStats(stats)}
+
+      <h2>Goleadores</h2>
+      ${renderScorersHtml(stats.scorers)}
+
+      <h2>DOT (Graphviz)</h2><pre>${escapeHtml(dot)}</pre>
+    </body></html>`;
+  }
+
   // Wiring global de botones para que funcionen antes/después del análisis
   showStandingsBtn.addEventListener('click', () => {
     if(lastAnalysis && lastAnalysis.stats) { reportArea.innerHTML = renderTeamStats(lastAnalysis.stats); navTo('reports'); }
@@ -887,10 +1462,46 @@ ELIMINACION {
     if(lastAnalysis && lastAnalysis.model) { const html = generateHtmlReport(lastAnalysis); downloadBlob('Reporte_TourneyJS.html', html, 'text/html;charset=utf-8'); }
     else noAnalysisMessage();
   });
-  exportReportBtn.addEventListener('click', () => {
-    if(lastAnalysis && lastAnalysis.model) { const html = generateHtmlReport(lastAnalysis); downloadBlob('Reporte_TourneyJS.html', html, 'text/html;charset=utf-8'); }
-    else noAnalysisMessage();
+
+  // Event listeners para descargas individuales
+  downloadTokensReport.addEventListener('click', () => {
+    if(lastAnalysis && lastAnalysis.tokens) {
+      const html = generateTokensReport(lastAnalysis.tokens);
+      downloadBlob('Tokens_TourneyJS.html', html, 'text/html;charset=utf-8');
+    } else noAnalysisMessage();
   });
+  
+  downloadErrorsReport.addEventListener('click', () => {
+    if(lastAnalysis && lastAnalysis.errors !== undefined) {
+      const html = generateErrorsReport(lastAnalysis.errors);
+      downloadBlob('Errores_TourneyJS.html', html, 'text/html;charset=utf-8');
+    } else noAnalysisMessage();
+  });
+  
+  downloadStatsReport.addEventListener('click', () => {
+    if(lastAnalysis && lastAnalysis.model && lastAnalysis.stats) {
+      const html = generateStatsReport(lastAnalysis.model, lastAnalysis.stats);
+      downloadBlob('Estadisticas_TourneyJS.html', html, 'text/html;charset=utf-8');
+    } else noAnalysisMessage();
+  });
+  
+  downloadScorersReport.addEventListener('click', () => {
+    if(lastAnalysis && lastAnalysis.stats) {
+      const html = generateScorersReport(lastAnalysis.stats);
+      downloadBlob('Goleadores_TourneyJS.html', html, 'text/html;charset=utf-8');
+    } else noAnalysisMessage();
+  });
+  
+  downloadBracketHtmlReport.addEventListener('click', () => {
+    if(lastAnalysis && lastAnalysis.model) {
+      const html = generateBracketHtmlReport(lastAnalysis.model);
+      downloadBlob('Bracket_TourneyJS.html', html, 'text/html;charset=utf-8');
+    } else noAnalysisMessage();
+  });
+
+  // Event listeners para descarga de imágenes
+  downloadPngBtn.addEventListener('click', () => downloadGraphImage('png'));
+  downloadSvgBtn.addEventListener('click', () => downloadGraphImage('svg'));
 
   // Analyze button
   analyzeBtn.addEventListener('click', () => {
@@ -909,25 +1520,23 @@ ELIMINACION {
     analyzeBtn.disabled = true;
     messagesEl.textContent = 'Analizando (fase 1/2)...';
 
-    //Fase 1: escaneo, análisis, estadísticas, generación de puntos (sincrónico pero diferido para permitir que la interfaz de usuario se actualice)
     setTimeout(() => {
       console.log(' Fase 1: Iniciando scan y parsing...');
       let tokens = [], scanErrors = [], model = null, buildErrors = [], stats = null, dot = '';
       try {
-        console.log('Ejecutando scan...');
+        console.log(' Ejecutando scan...');
         const r = scan(txt);
         tokens = r.tokens; scanErrors = r.errors;
-        console.log(`Scan completado: ${tokens.length} tokens, ${scanErrors.length} errores`);
+        console.log(` Scan completado: ${tokens.length} tokens, ${scanErrors.length} errores`);
 
-        console.log('Ejecutando buildModel...');
+        console.log(' Ejecutando buildModel...');
         const b = buildModel(tokens);
         model = b.model; buildErrors = b.errors;
-        console.log(`BuildModel completado: ${buildErrors.length} errores adicionales`);
+        console.log(` BuildModel completado: ${buildErrors.length} errores adicionales`);
 
         const allErrors = [...scanErrors, ...buildErrors];
-        console.log('Calculando estadísticas...');
+        console.log(' Calculando estadísticas...');
 
-        // Verificar que parseScore esté definida
         if (typeof parseScore !== 'function') {
           throw new Error('parseScore no está definida');
         }
@@ -936,15 +1545,13 @@ ELIMINACION {
         console.log(' Generando DOT...');
         dot = generateDOT(model);
 
-        // render tokens/errors immediately
-        console.log('Renderizando tokens y errores...');
+        console.log(' Renderizando tokens y errores...');
         tokensTableBody.innerHTML = tokens.map((t,i) => `<tr><td>${i+1}</td><td>${formatLexeme(t)}</td><td>${tokenTypeLabel(t)}</td><td>${t.line}</td><td>${t.col}</td></tr>`).join('');
         errorsTableBody.innerHTML = allErrors.map((e,i) => `<tr><td>${i+1}</td><td>${escapeHtml(e.lexema)}</td><td>${escapeHtml(e.tipo)}</td><td>${escapeHtml(e.descripcion||'')}</td><td>${e.line||''}</td><td>${e.col||''}</td></tr>`).join('');
 
-        // store partial analysis (DOT rendering next)
         lastAnalysis = {tokens, errors: allErrors, model, stats, dot};
         messagesEl.textContent = `Análisis completado. Preparando render DOT (fase 2/2)...`;
-        console.log('Análisis completado exitosamente');
+        console.log(' Análisis completado exitosamente');
       } catch(err) {
         console.error(' Error durante el análisis:', err);
         messagesEl.textContent = 'Error durante el análisis: ' + (err && err.message ? err.message : String(err));
@@ -952,13 +1559,12 @@ ELIMINACION {
         return;
       }
 
-      //Fase 2: renderizar DOT (diferido, se puede usar viz.js)
       setTimeout(() => {
         graphDiv.innerHTML = '';
         try {
           if(typeof Viz === 'undefined'){
             graphDiv.textContent = 'Viz.js no está cargado. DOT disponible en la sección Bracket como texto.';
-            messagesEl.textContent = ' Viz.js no disponible. Se completó el análisis pero no se puede renderizar el gráfico.';
+            messagesEl.textContent = 'Viz.js no disponible. Se completó el análisis pero no se puede renderizar el gráfico.';
           } else {
             const viz = new Viz();
             viz.renderSVGElement(lastAnalysis.dot).then(element => {
@@ -976,76 +1582,9 @@ ELIMINACION {
           graphDiv.textContent = 'Error inesperado al intentar renderizar DOT: ' + err;
           messagesEl.textContent = ' Error en la fase DOT.';
         }
-        // fallback: enable button if Viz no estaba disponible
         analyzeBtn.disabled = false;
-      }, 50); // pequeña espera para actualizar UI antes de render
-    }, 20); // pequeña espera para que "Analizando..." se pinte
-  }); // analyzeBtn
+      }, 50);
+    }, 20);
+  });
 
-  // helper navigate to tab
-  function navTo(tabId){
-    navLinks.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#'+tabId));
-    tabs.forEach(t => t.classList.toggle('active', t.id === tabId));
-  }
-
-  // download helper
-  function downloadBlob(filename, content, type='text/plain;charset=utf-8'){
-    const blob = new Blob([content], {type});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  // HTML report generator (embebe los reportes)
-  function generateHtmlReport({tokens, errors, model, stats, dot}){
-    const styles = `<style>
-        body{font-family:Arial,Helvetica,sans-serif;background:#0b1220;color:#e6eef6;padding:20px}
-        h1,h2,h3{color:#06b6d4} table{width:100%;border-collapse:collapse;margin-bottom:12px}
-        th,td{padding:8px;border:1px solid #233240} th{background:#071a2b;color:#06b6d4}
-        .card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
-        .card{background:#071a2b;padding:12px;border-radius:8px}
-        /* estilos team-stats (tema oscuro) */
-        .team-stats { width:100%; border-collapse: collapse; margin-top:12px; font-family: Poppins, Arial, sans-serif; color:#e6eef6; }
-        .team-stats thead th { background:#071a2b; color:#06b6d4; padding:12px; text-align:left; font-weight:600; border:1px solid rgba(255,255,255,0.03); }
-        .team-stats tbody td { padding:12px; border-top:1px solid rgba(255,255,255,0.02); color:#dbeef7; }
-        .team-stats tbody tr td:not(.team-name) { background: rgba(6,182,212,0.03); text-align:center; }
-        .team-stats tbody tr:nth-child(odd) td:not(.team-name) { background: rgba(6,182,212,0.025); }
-        .team-stats tbody td.team-name { background:#0b2a3a; color:#e6eef6; font-weight:600; text-align:left; }
-      </style>`;
-    return `<!doctype html><html><head><meta charset="utf-8"><title>Reporte TourneyJS</title>${styles}</head><body>
-      <h1>Reporte TourneyJS</h1>
-      <h2>Tokens</h2>
-      <table><thead><tr><th>No</th><th>Lexema</th><th>Tipo</th><th>Línea</th><th>Col</th></tr></thead><tbody>
-      ${tokens.map((t,i)=>`<tr><td>${i+1}</td><td>${formatLexeme(t)}</td><td>${tokenTypeLabel(t)}</td><td>${t.line}</td><td>${t.col}</td></tr>`).join('')}
-      </tbody></table>
-
-      <h2>Errores</h2>
-      <table><thead><tr><th>No</th><th>Lexema</th><th>Tipo</th><th>Descripción</th><th>Línea</th><th>Col</th></tr></thead><tbody>
-      ${errors.map((e,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(e.lexema)}</td><td>${escapeHtml(e.tipo)}</td><td>${escapeHtml(e.descripcion||'')}</td><td>${e.line||''}</td><td>${e.col||''}</td></tr>`).join('')}
-      </tbody></table>
-
-      <h2>Información General</h2>
-      ${renderGeneralInfo(model, stats)}
-
-      <h2>Bracket de Eliminación</h2>
-      ${renderBracketReport(model)}
-
-      <h2>Tabla de Posiciones</h2>
-      ${renderTeamStats(stats)}
-
-      <h2>Goleadores</h2>
-      ${renderScorersHtml(stats.scorers)}
-
-      <h2>DOT (Graphviz)</h2><pre>${escapeHtml(dot)}</pre>
-    </body></html>`;
-  }
-
-  // optionally preload example text (commented)
-  // inputText.value = exampleText;
 }); // DOMContentLoaded
-
-
