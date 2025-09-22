@@ -449,15 +449,12 @@ function parseScore(resultado){
   };
 }
 
-/* ============================
-   computeStats(model)
-   - Devuelve {standings: [...], scorers: [...]}
-   ============================ */
+//Calcula estadísticas de equipos y goleadores a partir del modelo de datos.
+
 function computeStats(model){
   const teams = {};
   const scorers = []; // Cambiar a array para mantener goles individuales
 
-  // initialize from equipos list
   if(model.equipos && Array.isArray(model.equipos)){
     model.equipos.forEach(t => {
       teams[t.nombre] = {
